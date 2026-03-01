@@ -1,0 +1,69 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# docker-compose.yml — Qwen3-VL RKLLM conversion workflow  v1.0
+#
+# Usage:
+#   cp .env.example .env && nano .env        # set HF_TOKEN
+#   docker compose build                     # build image once
+#   docker compose run --rm convert <model_id> [vision_res]
+#
+# Examples:
+#   docker compose run --rm convert Qwen/Qwen3-VL-4B-Instruct 448
+#   docker compose run --rm convert Qwen/Qwen3-VL-8B-Instruct 448
+#   docker compose run --rm convert Qwen/Qwen3-VL-30B-A3B-Instruct 448
+#   docker compose run --rm convert Qwen/Qwen3-VL-32B-Instruct 448
+# ══════════════════════════════════════════════════════════════════════════════
+services:
+
+  convert:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rkllm-convert:1.0
+
+    # Pass HF token from .env into container — never hardcoded.
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+
+    volumes:
+      # ── Persistent HF model cache ─────────────────────────────────────────
+      # Models downloaded once and reused across all convert runs.
+      # Change the left side to any fast local path with enough space:
+      #   Qwen3-VL-4B  →  ~9 GB     Qwen3-VL-8B  →  ~18 GB
+      #   Qwen3-VL-30B →  ~62 GB    Qwen3-VL-32B →  ~66 GB
+      - ./cache:/cache
+
+      # ── Converted output files (.rkllm, .rknn) ───────────────────────────
+      - ./output:/output
+
+      # ── Conversion scripts (live-mounted, no rebuild needed to edit) ──────
+      - ./scripts:/scripts:ro
+
+    # Use the conda env Python, not the Ubuntu system python3 (/usr/bin/python3).
+    # All subprocess calls in convert.py also use this path via the PYTHON constant.
+    entrypoint: ["/opt/conda/envs/rkllm/bin/python", "/scripts/convert.py"]
+
+    # Shared memory: torch DataLoader workers need this
+    shm_size: "2gb"
+
+    # Increase ulimits for large model file handles
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # ── Shell service: drop into container for debugging ─────────────────────
+  shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rkllm-convert:1.0
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - ./cache:/cache
+      - ./output:/output
+      - ./scripts:/scripts
+    entrypoint: ["/bin/bash"]
+    stdin_open: true
+    tty: true
+    shm_size: "2gb"
